@@ -764,9 +764,12 @@
         // Discord OAuth Configuration
         const DISCORD_CONFIG = {
             clientId: '1416381905024323755',
-            redirectUri: window.location.origin + window.location.pathname,
-            scope: 'identify connections',
-            apiBase: 'https://discord.com/api/v10'
+            redirectUri: 'https://mydiscordprofile.vercel.app',
+            responseType: 'code',
+            scope: 'identify connections presences.write activities.write relationships.write',
+            apiBase: 'https://discord.com/api/v10',
+            // Backend endpoint để exchange code -> token (cần setup)
+            tokenExchangeEndpoint: '/api/discord/token'
         };
 
         // Danh sách tên ngẫu nhiên
@@ -831,25 +834,105 @@
 
         // Discord OAuth Functions
         function loginWithDiscord() {
-            const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CONFIG.clientId}&redirect_uri=${encodeURIComponent(DISCORD_CONFIG.redirectUri)}&response_type=token&scope=${encodeURIComponent(DISCORD_CONFIG.scope)}`;
+            const authUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CONFIG.clientId}&redirect_uri=${encodeURIComponent(DISCORD_CONFIG.redirectUri)}&response_type=${DISCORD_CONFIG.responseType}&scope=${encodeURIComponent(DISCORD_CONFIG.scope)}`;
+            
+            showNotification('🔄 Đang chuyển đến Discord...');
+            
+            // Save current state before redirect
+            saveToLocalStorage();
+            
             window.location.href = authUrl;
         }
 
         function handleOAuthCallback() {
-            const hash = window.location.hash.substring(1);
-            const params = new URLSearchParams(hash);
-            const accessToken = params.get('access_token');
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            const error = urlParams.get('error');
 
-            if (accessToken) {
-                userData.accessToken = accessToken;
-                userData.isDiscordMode = true;
-                
-                // Clear hash from URL
+            if (error) {
+                showNotification('❌ Lỗi đăng nhập: ' + error);
+                // Clear URL params
                 window.history.replaceState(null, null, window.location.pathname);
-                
-                // Fetch Discord user data
-                fetchDiscordUser(accessToken);
+                return;
             }
+
+            if (code) {
+                // Exchange code for access token
+                exchangeCodeForToken(code);
+                
+                // Clear URL params
+                window.history.replaceState(null, null, window.location.pathname);
+            }
+        }
+
+        async function exchangeCodeForToken(code) {
+            showNotification('🔄 Đang xử lý đăng nhập...');
+            
+            try {
+                // Try to use backend API
+                const backendUrl = window.location.origin + '/api/discord/token';
+                
+                const response = await fetch(backendUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        code: code,
+                        redirect_uri: DISCORD_CONFIG.redirectUri
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    userData.accessToken = data.access_token;
+                    userData.refreshToken = data.refresh_token;
+                    userData.isDiscordMode = true;
+                    
+                    await fetchDiscordUser(data.access_token);
+                    showNotification('✅ Đăng nhập Discord thành công!');
+                } else {
+                    throw new Error('Backend not configured');
+                }
+                
+            } catch (error) {
+                console.error('Token exchange error:', error);
+                
+                // Fallback to demo mode
+                showNotification('⚠️ Backend chưa setup. Dùng chế độ Demo...');
+                simulateDiscordLogin(code);
+            }
+        }
+
+        // Demo function - replace with real API call when backend is ready
+        function simulateDiscordLogin(code) {
+            // Create mock Discord user
+            const mockUser = {
+                id: '123456789012345678',
+                username: 'DemoUser' + Math.floor(Math.random() * 9999),
+                discriminator: Math.floor(Math.random() * 9999).toString().padStart(4, '0'),
+                global_name: 'Demo Discord User',
+                avatar: null,
+                bio: 'Demo profile - Cần setup backend để lấy data thật từ Discord API!',
+                banner: null,
+                accent_color: null,
+                connections: [
+                    { type: 'spotify', name: 'Demo Spotify', verified: true },
+                    { type: 'github', name: 'demo-github', verified: true }
+                ]
+            };
+
+            userData.isDiscordMode = true;
+            userData.discordData = mockUser;
+            userData.isDemoMode = true;
+            
+            updateUIWithDiscordData(mockUser);
+            saveToLocalStorage();
+            
+            showNotification('✅ Demo Mode: Đã tạo profile mẫu!', 5000);
+            setTimeout(() => {
+                showNotification('💡 Tip: Setup backend API để dùng Discord data thật!', 5000);
+            }, 2000);
         }
 
         async function fetchDiscordUser(token) {
@@ -1325,7 +1408,7 @@
         }
 
         // Thông báo
-        function showNotification(message) {
+        function showNotification(message, duration = 3000) {
             const notification = document.createElement('div');
             notification.className = 'notification';
             notification.textContent = message;
@@ -1333,7 +1416,7 @@
             
             setTimeout(() => {
                 notification.remove();
-            }, 3000);
+            }, duration);
         }
 
         // Local Storage
