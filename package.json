@@ -1,0 +1,22 @@
+{
+  "name": "discord-profile-creator",
+  "version": "2.0.0",
+  "description": "Create and customize your Discord profile with effects and animations",
+  "main": "discord-profile-creator.html",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "keywords": [
+    "discord",
+    "profile",
+    "creator",
+    "oauth2",
+    "customization"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "vercel": "^33.0.0"
+  }
+}
