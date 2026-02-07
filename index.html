@@ -766,7 +766,8 @@
             clientId: '1416381905024323755',
             redirectUri: 'https://mydiscordprofile.vercel.app',
             responseType: 'code',
-            scope: 'identify connections presences.write activities.write relationships.write',
+            // Only use valid scopes that Discord supports
+            scope: 'identify connections',
             apiBase: 'https://discord.com/api/v10',
             // Backend endpoint để exchange code -> token (cần setup)
             tokenExchangeEndpoint: '/api/discord/token'
@@ -812,24 +813,39 @@
             },
             discordData: null,
             isDiscordMode: false,
-            accessToken: null
+            accessToken: null,
+            timerInterval: null
         };
 
         let usedNames = new Set();
 
         // Khởi tạo
         function init() {
-            // Kiểm tra OAuth callback
-            handleOAuthCallback();
+            console.log('🚀 Initializing Discord Profile Creator...');
             
-            if (!userData.isDiscordMode) {
-                assignRandomUsername();
+            try {
+                // Kiểm tra OAuth callback
+                handleOAuthCallback();
+                
+                // Khởi tạo session time
+                if (!userData.sessionStart) {
+                    userData.sessionStart = Date.now();
+                }
+                
+                if (!userData.isDiscordMode) {
+                    assignRandomUsername();
+                }
+                
+                renderEffects();
+                setupEventListeners();
+                startTimer();
+                loadFromLocalStorage();
+                
+                console.log('✅ Initialization complete');
+            } catch (error) {
+                console.error('❌ Initialization error:', error);
+                showNotification('⚠️ Có lỗi khi khởi tạo. Vui lòng refresh trang.');
             }
-            
-            renderEffects();
-            setupEventListeners();
-            startTimer();
-            loadFromLocalStorage();
         }
 
         // Discord OAuth Functions
@@ -1051,9 +1067,23 @@
             usedNames.add(randomName);
             userData.username = randomName;
             
-            document.getElementById('headerUsername').textContent = randomName;
-            document.getElementById('headerAvatar').textContent = randomName[0];
-            document.getElementById('displayName').value = randomName;
+            // Safely update DOM elements
+            const headerUsernameEl = document.getElementById('headerUsername');
+            const headerAvatarEl = document.getElementById('headerAvatar');
+            const displayNameEl = document.getElementById('displayName');
+            
+            if (headerUsernameEl) {
+                headerUsernameEl.textContent = randomName;
+            }
+            
+            if (headerAvatarEl) {
+                headerAvatarEl.innerHTML = `${randomName[0]}<div class="status-indicator status-offline" id="statusIndicator"></div>`;
+            }
+            
+            if (displayNameEl) {
+                displayNameEl.value = randomName;
+            }
+            
             updatePreview();
         }
 
@@ -1134,86 +1164,148 @@
 
         // Cập nhật preview
         function updatePreview() {
-            document.getElementById('previewUsername').textContent = 
-                document.getElementById('displayName').value || userData.username;
-            document.getElementById('previewBio').textContent = 
-                document.getElementById('bio').value || 'Bio của bạn sẽ hiển thị ở đây...';
+            const displayNameEl = document.getElementById('displayName');
+            const bioEl = document.getElementById('bio');
+            const avatarTextEl = document.getElementById('avatarText');
+            const statusSelectEl = document.getElementById('statusSelect');
+            const customStatusEl = document.getElementById('customStatus');
+            const previewUsernameEl = document.getElementById('previewUsername');
+            const previewBioEl = document.getElementById('previewBio');
+            const previewAvatarEl = document.getElementById('previewAvatar');
+            const previewStatusEl = document.getElementById('previewStatus');
+            const statusIndicatorEl = document.getElementById('statusIndicator');
+            const previewCustomStatusEl = document.getElementById('previewCustomStatus');
+            const previewStatusEmojiEl = document.getElementById('previewStatusEmoji');
+            const previewStatusTextEl = document.getElementById('previewStatusText');
+
+            // Safety checks
+            if (!displayNameEl || !bioEl || !avatarTextEl || !previewUsernameEl || !previewBioEl || !previewAvatarEl) {
+                console.error('Required DOM elements not found');
+                return;
+            }
+
+            previewUsernameEl.textContent = displayNameEl.value || userData.username;
+            previewBioEl.textContent = bioEl.value || 'Bio của bạn sẽ hiển thị ở đây...';
             
             // Update avatar
-            const avatarInput = document.getElementById('avatarText').value;
-            const previewAvatar = document.getElementById('previewAvatar');
+            const avatarInput = avatarTextEl.value;
             
-            if (avatarInput.startsWith('http://') || avatarInput.startsWith('https://')) {
+            if (avatarInput && (avatarInput.startsWith('http://') || avatarInput.startsWith('https://'))) {
                 // URL image
-                previewAvatar.innerHTML = `
-                    <img src="${avatarInput}" class="user-avatar-img" alt="Avatar" onerror="this.parentElement.innerHTML='❌'">
+                previewAvatarEl.innerHTML = `
+                    <img src="${avatarInput}" class="user-avatar-img" alt="Avatar" onerror="this.parentElement.innerHTML='❌<div class=\\'status-indicator status-${userData.profile.status}\\' id=\\'previewStatus\\'></div>'">
                     <div class="status-indicator status-${userData.profile.status}" id="previewStatus"></div>
                 `;
             } else {
                 // Emoji or text
-                previewAvatar.innerHTML = `
+                previewAvatarEl.innerHTML = `
                     ${avatarInput || userData.username[0]}
                     <div class="status-indicator status-${userData.profile.status}" id="previewStatus"></div>
                 `;
             }
 
             // Update status
-            const status = document.getElementById('statusSelect').value;
-            userData.profile.status = status;
-            document.getElementById('previewStatus').className = `status-indicator status-${status}`;
-            document.getElementById('statusIndicator').className = `status-indicator status-${status}`;
+            if (statusSelectEl) {
+                const status = statusSelectEl.value;
+                userData.profile.status = status;
+                
+                const newPreviewStatusEl = document.getElementById('previewStatus');
+                const newStatusIndicatorEl = document.getElementById('statusIndicator');
+                
+                if (newPreviewStatusEl) {
+                    newPreviewStatusEl.className = `status-indicator status-${status}`;
+                }
+                if (newStatusIndicatorEl) {
+                    newStatusIndicatorEl.className = `status-indicator status-${status}`;
+                }
+            }
 
             // Update custom status
-            const customStatus = document.getElementById('customStatus').value;
-            if (customStatus) {
-                const parts = customStatus.split(' ');
-                const emoji = parts[0];
-                const text = parts.slice(1).join(' ');
-                
-                document.getElementById('previewCustomStatus').style.display = 'flex';
-                document.getElementById('previewStatusEmoji').textContent = emoji;
-                document.getElementById('previewStatusText').textContent = text;
-            } else {
-                document.getElementById('previewCustomStatus').style.display = 'none';
+            if (customStatusEl && previewCustomStatusEl && previewStatusEmojiEl && previewStatusTextEl) {
+                const customStatus = customStatusEl.value;
+                if (customStatus) {
+                    const parts = customStatus.split(' ');
+                    const emoji = parts[0];
+                    const text = parts.slice(1).join(' ');
+                    
+                    previewCustomStatusEl.style.display = 'flex';
+                    previewStatusEmojiEl.textContent = emoji;
+                    previewStatusTextEl.textContent = text;
+                } else {
+                    previewCustomStatusEl.style.display = 'none';
+                }
             }
         }
 
         // Setup event listeners
         function setupEventListeners() {
-            document.getElementById('displayName').addEventListener('input', updatePreview);
-            document.getElementById('bio').addEventListener('input', updatePreview);
-            document.getElementById('avatarText').addEventListener('input', updatePreview);
-            document.getElementById('statusSelect').addEventListener('change', updatePreview);
-            document.getElementById('customStatus').addEventListener('input', updatePreview);
+            const displayNameEl = document.getElementById('displayName');
+            const bioEl = document.getElementById('bio');
+            const avatarTextEl = document.getElementById('avatarText');
+            const statusSelectEl = document.getElementById('statusSelect');
+            const customStatusEl = document.getElementById('customStatus');
+            const effectSpeedEl = document.getElementById('effectSpeed');
+            const effectIntensityEl = document.getElementById('effectIntensity');
+
+            if (displayNameEl) {
+                displayNameEl.addEventListener('input', updatePreview);
+            }
+            if (bioEl) {
+                bioEl.addEventListener('input', updatePreview);
+            }
+            if (avatarTextEl) {
+                avatarTextEl.addEventListener('input', updatePreview);
+            }
+            if (statusSelectEl) {
+                statusSelectEl.addEventListener('change', updatePreview);
+            }
+            if (customStatusEl) {
+                customStatusEl.addEventListener('input', updatePreview);
+            }
             
-            document.getElementById('effectSpeed').addEventListener('input', (e) => {
-                const speed = 11 - e.target.value; // Đảo ngược để giá trị cao = nhanh hơn
-                document.documentElement.style.setProperty('--animation-speed', `${speed * 0.2}s`);
-            });
+            if (effectSpeedEl) {
+                effectSpeedEl.addEventListener('input', (e) => {
+                    const speed = 11 - e.target.value;
+                    document.documentElement.style.setProperty('--animation-speed', `${speed * 0.2}s`);
+                });
+            }
             
-            document.getElementById('effectIntensity').addEventListener('input', (e) => {
-                const intensity = e.target.value / 10;
-                document.documentElement.style.setProperty('--animation-intensity', intensity);
-            });
+            if (effectIntensityEl) {
+                effectIntensityEl.addEventListener('input', (e) => {
+                    const intensity = e.target.value / 10;
+                    document.documentElement.style.setProperty('--animation-intensity', intensity);
+                });
+            }
         }
 
         // Timer và tính coin
         function startTimer() {
-            setInterval(() => {
+            // Đảm bảo sessionStart được set
+            if (!userData.sessionStart) {
+                userData.sessionStart = Date.now();
+            }
+
+            // Update timer mỗi giây
+            const timerInterval = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - userData.sessionStart) / 1000);
                 const minutes = Math.floor(elapsed / 60);
                 const seconds = elapsed % 60;
                 
-                document.getElementById('sessionTimer').textContent = 
-                    `Thời gian: ${minutes}:${seconds.toString().padStart(2, '0')}`;
-                
-                // Mở shop sau 5 phút
-                if (elapsed >= 300 && document.getElementById('shopBtn').style.display === 'none') {
-                    document.getElementById('shopBtn').style.display = 'block';
-                    showNotification('🎉 Cửa hàng đã mở! Bạn có thể chia sẻ và mua profile!');
+                const timerEl = document.getElementById('sessionTimer');
+                if (timerEl) {
+                    timerEl.textContent = `Thời gian: ${minutes}:${seconds.toString().padStart(2, '0')}`;
                 }
                 
-                // Tặng coin mỗi 5 phút
+                // Mở shop sau 5 phút (300 giây)
+                if (elapsed >= 300) {
+                    const shopBtn = document.getElementById('shopBtn');
+                    if (shopBtn && shopBtn.style.display === 'none') {
+                        shopBtn.style.display = 'block';
+                        showNotification('🎉 Cửa hàng đã mở! Bạn có thể chia sẻ và mua profile!');
+                    }
+                }
+                
+                // Tặng coin mỗi 5 phút (chỉ tính từ lần đầu, sau đó mỗi 300 giây)
                 if (elapsed > 0 && elapsed % 300 === 0) {
                     userData.coins += 1;
                     updateCoins();
@@ -1221,11 +1313,17 @@
                     saveToLocalStorage();
                 }
             }, 1000);
+
+            // Lưu interval để có thể clear nếu cần
+            userData.timerInterval = timerInterval;
         }
 
         // Cập nhật hiển thị coin
         function updateCoins() {
-            document.getElementById('coinCount').textContent = userData.coins;
+            const coinCountEl = document.getElementById('coinCount');
+            if (coinCountEl) {
+                coinCountEl.textContent = userData.coins;
+            }
         }
 
         // Lưu profile
@@ -1454,8 +1552,12 @@
             usedNames.delete(userData.username);
         });
 
-        // Khởi động
-        init();
+        // Khởi động - Đợi DOM load xong
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
     </script>
 </body>
 </html>
